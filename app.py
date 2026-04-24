@@ -46,7 +46,7 @@ def delete_record(table_name, record_id):
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3075/3075908.png", width=50)
     st.title("Sayo Brewery")
-    st.caption("v10.0 Unified POS (Full Edition)")
+    st.caption("v11.0 Real-time POS & Cart")
     st.divider()
     menu = st.radio("📂 メニュー", ("🏠 ホーム", "🏪 直売所レジ", "🧪 仕込み記録", "📦 在庫管理", "📈 利益分析", "📜 酒税帳簿", "📝 経理・マスタ", "🔧 システム管理"), label_visibility="collapsed")
     st.divider()
@@ -74,39 +74,90 @@ if menu == "🏠 ホーム":
     st.dataframe(df_j.head(10), use_container_width=True, hide_index=True)
 
 elif menu == "🏪 直売所レジ":
-    st.header("🏪 かんたんPOSレジ")
+    st.header("🏪 かんたんPOSレジ (カート機能付き)")
     df_p = load_data("products")
-    if df_p.empty: st.warning("製品マスタから商品を登録してください")
+    
+    if df_p.empty: 
+        st.warning("製品マスタから商品を登録してください")
     else:
-        with st.container(border=True):
-            with st.form("pos"):
+        # ★ 新機能：カート（買い物かご）の準備
+        if 'cart' not in st.session_state:
+            st.session_state['cart'] = []
+
+        col_input, col_cart = st.columns([1, 1])
+
+        # --- 左側：商品をカートに入れるエリア ---
+        with col_input:
+            st.subheader("🛒 商品を選ぶ")
+            with st.container(border=True):
+                # リアルタイム計算のために st.form を削除！
                 sel_p = st.selectbox("商品を選択", df_p['name'].tolist())
                 row = df_p[df_p['name'] == sel_p].iloc[0]
                 
                 st.write(f"現在の在庫: **{row['stock']}本** | 定価: ¥{row['price']:,}")
-                price_type = st.radio("販売区分", ["定価 (そのまま)", "創業特価 (1,980円)", "卸売 (7掛)", "カスタム自由入力"], horizontal=True)
+                price_type = st.radio("販売区分", ["定価", "創業特価 (1,980円)", "卸売 (7掛)", "自由入力"], horizontal=True)
                 
-                col1, col2 = st.columns(2)
-                with col1:
+                c1, c2 = st.columns(2)
+                with c1:
                     num = st.number_input("販売数量", min_value=1, value=1)
-                with col2:
-                    if price_type == "定価 (そのまま)": unit_p = row['price']
+                with c2:
+                    if price_type == "定価": unit_p = row['price']
                     elif price_type == "創業特価 (1,980円)": unit_p = 1980
                     elif price_type == "卸売 (7掛)": unit_p = int(row['price'] * 0.7)
                     else: unit_p = st.number_input("自由単価入力(円)", value=row['price'])
                     
-                    total = unit_p * num
-                    st.metric("お会計合計", f"¥ {total:,}")
+                    # 数量を変えると即座にここが計算されます
+                    subtotal = unit_p * num
+                    st.metric("小計", f"¥ {subtotal:,}")
 
-                if st.form_submit_button("💰 会計完了（売上計上）", type="primary"):
-                    conn = get_connection(); cur = conn.cursor()
-                    cur.execute("UPDATE products SET stock = stock - %s WHERE name = %s", (num, sel_p))
-                    l = (row['volume_ml'] * num) / 1000.0; tax = int(l * 140); today = datetime.date.today()
-                    cur.execute("INSERT INTO journal_entries (date, description, debit_account, credit_account, amount) VALUES (%s,%s,%s,%s,%s)", (today, f"売上({price_type}):{sel_p}x{num}", '現預金', '売上高', total))
-                    cur.execute("INSERT INTO tax_records (date, product_name, quantity, total_liters, tax_amount) VALUES (%s,%s,%s,%s,%s)", (today, sel_p, num, l, tax))
-                    cur.execute("INSERT INTO journal_entries (date, description, debit_account, credit_account, amount) VALUES (%s,%s,%s,%s,%s)", (today, f"酒税計上:{l}L", '租税公課', '未払酒税', tax))
-                    conn.commit(); cur.close(); conn.close()
-                    st.balloons(); st.toast("売上と酒税を記録しました！")
+                if st.button("➕ カートに追加する", use_container_width=True):
+                    # カートの中に商品データを保存
+                    st.session_state['cart'].append({
+                        "name": sel_p,
+                        "type": price_type,
+                        "price": unit_p,
+                        "qty": num,
+                        "subtotal": subtotal,
+                        "ml": row['volume_ml']
+                    })
+                    st.success(f"「{sel_p}」をカートに追加しました！")
+                    st.rerun() # 画面をリフレッシュ
+
+        # --- 右側：カートの中身とお会計エリア ---
+        with col_cart:
+            st.subheader("🛍️ 現在のカート")
+            with st.container(border=True):
+                if not st.session_state['cart']:
+                    st.info("カートは空です。左から商品を追加してください。")
+                else:
+                    # カートの中身を表で表示
+                    cart_df = pd.DataFrame(st.session_state['cart'])
+                    st.dataframe(cart_df[['name', 'type', 'qty', 'subtotal']], use_container_width=True, hide_index=True)
+                    
+                    # 総合計の計算
+                    grand_total = sum(item['subtotal'] for item in st.session_state['cart'])
+                    st.metric("💳 総合計", f"¥ {grand_total:,}")
+                    
+                    if st.button("💰 お会計を完了する（一括記録）", type="primary", use_container_width=True):
+                        conn = get_connection(); cur = conn.cursor()
+                        today = datetime.date.today()
+                        
+                        # カートの中身を1つずつ取り出して処理
+                        for item in st.session_state['cart']:
+                            cur.execute("UPDATE products SET stock = stock - %s WHERE name = %s", (item['qty'], item['name']))
+                            l = (item['ml'] * item['qty']) / 1000.0; tax = int(l * 100) # 酒税100円/L
+                            cur.execute("INSERT INTO journal_entries (date, description, debit_account, credit_account, amount) VALUES (%s,%s,%s,%s,%s)", (today, f"売上({item['type']}):{item['name']}x{item['qty']}", '現預金', '売上高', item['subtotal']))
+                            cur.execute("INSERT INTO tax_records (date, product_name, quantity, total_liters, tax_amount) VALUES (%s,%s,%s,%s,%s)", (today, item['name'], item['qty'], l, tax))
+                            cur.execute("INSERT INTO journal_entries (date, description, debit_account, credit_account, amount) VALUES (%s,%s,%s,%s,%s)", (today, f"酒税計上:{l}L", '租税公課', '未払酒税', tax))
+                        
+                        conn.commit(); cur.close(); conn.close()
+                        st.session_state['cart'] = [] # お会計が終わったのでカートを空にする
+                        st.balloons(); st.success("お会計が完了し、すべての売上と酒税を記録しました！")
+                        st.rerun()
+                        
+                    if st.button("🗑️ カートを空にしてやり直す"):
+                        st.session_state['cart'] = []
+                        st.rerun()
 
 elif menu == "🧪 仕込み記録":
     st.header("🧪 配合ベース仕込み記録")
@@ -167,7 +218,7 @@ elif menu == "📈 利益分析":
     with st.container(border=True):
         c1, c2 = st.columns([1, 2])
         with c1:
-            p = st.number_input("販売価格(円)", value=2000, step=100)
+            p = st.number_input("販売価格(円)", value=2500, step=100)
             ml = st.number_input("容器の容量(ml)", value=720, step=10)
             m_c = st.number_input("原材料費/本(円)", value=295, step=50)
             p_c = st.number_input("資材費/本(円)", value=243, step=50)
