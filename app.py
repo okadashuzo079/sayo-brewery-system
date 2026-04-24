@@ -8,7 +8,7 @@ st.set_page_config(page_title="醸造所システム (Cloud)", layout="wide")
 
 # --- 接続設定 ---
 # ⚠️ ここはご自身のパスワード入りのConnection Stringに必ず書き換えてください！
-DB_URL = "postgresql://postgres:19960519Tatsuki@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres"
+DB_URL = "postgresql://postgres.qoghpcgjweqyczbbcttj:19960519Tatsuki@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
