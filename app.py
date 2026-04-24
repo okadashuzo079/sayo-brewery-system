@@ -8,7 +8,7 @@ st.set_page_config(page_title="Sayo Brewery 🍺", page_icon="🌾", layout="wid
 
 # --- 接続設定 ---
 # ⚠️ プロジェクトID・パスワード設定済みの確実なURLです
-DB_URL = "postgresql://postgres.qoghpcgjweqyczbbcttj:19960519Tatsuki@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres"
+DB_URL = "postgresql://postgres.qoghpcgjweqyczbbcttj:19960519Tatsuki@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
